@@ -1,5 +1,10 @@
 {
-	"name": "ws Add-ons",
-	"url": "https://github.com/hyecahn/eville",
-	"maintainer": "ws <hytecahn@gmail.com>"
+  "name": "ws Add-ons",
+  "url": "https://github.com/hyecahn/eville",
+  "maintainer": "ws <hytecahn@gmail.com>",
+  "addons": [
+    "ezville_wallpad",
+    "simple_mqtt_ezville_control",
+    "wallpad"
+  ]
 }
