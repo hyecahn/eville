@@ -400,6 +400,8 @@ def ezville_loop(config):
                                 payload = {'event': 'elevator_arrival', 'packet': packet, 'timestamp': int(time.time())}
                                 mqtt_client.publish(HA_TOPIC + '/elevator/arrival', json.dumps(payload))
                                 log('[ALERT] Elevator arrival detected: {}'.format(packet))
+                                if mqtt_log:
+                                    log('[LOG] ->> HA : {} >> {}'.format(HA_TOPIC + '/elevator/arrival', json.dumps(payload)))
                         except Exception as _e:
                             log('[ERROR] Elevator arrival publish failed: {}'.format(_e))
                         # MSG_CACHE에 없는 새로운 패킷이거나 FORCE_UPDATE 실행된 경우만 실행
