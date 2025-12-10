@@ -393,18 +393,19 @@ def ezville_loop(config):
                     elif packet[2:4] in ACK_HEADER and packet[6:8] in ACK_HEADER[packet[2:4]][1]:
                         ACK_PACKET = True
                     
-                    if STATE_PACKET or ACK_PACKET:
-                        # 엘리베이터 도착 패킷 감지 (F7 33 01 43 01 80 07 ...)
+                    # 엘리베이터 도착 패킷 감지 (F7 33 01 43 01 80 07 ...)
                         # 패킷 분석: F7=시작, 33=엘리베이터, 0143=도착명령, 018007=도착상태
-                        try:
-                            if packet[2:14] == '33014301800716' or packet[2:14] == '33014301800706' or packet[2:12] == '330143018007':
-                                payload = {'event': 'elevator_arrival', 'packet': packet, 'timestamp': int(time.time())}
-                                mqtt_client.publish(HA_TOPIC + '/elevator/arrival', json.dumps(payload))
-                                log('[ALERT] Elevator arrival detected: {}'.format(packet))
-                                if mqtt_log:
-                                    log('[LOG] ->> HA : {} >> {}'.format(HA_TOPIC + '/elevator/arrival', json.dumps(payload)))
-                        except Exception as _e:
-                            log('[ERROR] Elevator arrival publish failed: {}'.format(_e))
+                    try:
+                        if packet[2:12] == '330143018007':
+                            payload = {'event': 'elevator_arrival', 'packet': packet, 'timestamp': int(time.time())}
+                            mqtt_client.publish(HA_TOPIC + '/elevator/arrival', json.dumps(payload))
+                            log('[ALERT] Elevator arrival detected: {}'.format(packet))
+                            if mqtt_log:
+                                log('[LOG] ->> HA : {} >> {}'.format(HA_TOPIC + '/elevator/arrival', json.dumps(payload)))
+                    except Exception as _e:
+                        log('[ERROR] Elevator arrival publish failed: {}'.format(_e))
+
+                    if STATE_PACKET or ACK_PACKET:
                         # MSG_CACHE에 없는 새로운 패킷이거나 FORCE_UPDATE 실행된 경우만 실행
                         if MSG_CACHE.get(packet[0:10]) != packet[10:] or FORCE_UPDATE:
                             name = STATE_HEADER[packet[2:4]][0]                            
