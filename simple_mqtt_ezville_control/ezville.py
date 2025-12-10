@@ -244,6 +244,12 @@ def ezville_loop(config):
     EW11_TIMEOUT = config['ew11_timeout']
     last_received_time = time.time()
     
+    # Addon 먹통 상태 감지 및 자체 리셋 설정
+    last_command_time = time.time()
+    last_state_update_time = time.time()
+    HEALTH_CHECK_INTERVAL = 60  # 60초마다 헬스 체크 실행
+    HEALTH_CHECK_TIMEOUT = 300  # 300초(5분) 동안 활동이 없으면 먹통으로 판단
+    
     # EW11 재시작 확인용 Flag
     restart_flag = False
   
@@ -342,9 +348,11 @@ def ezville_loop(config):
         nonlocal DISCOVERY_LIST
         nonlocal RESIDUE
         nonlocal MSG_CACHE
-        nonlocal DEVICE_STATE       
+        nonlocal DEVICE_STATE
+        nonlocal last_state_update_time
         
         raw_data = RESIDUE + raw_data
+        last_state_update_time = time.time()
         
         if ew11_log:
             log('[SIGNAL] receved: {}'.format(raw_data))
@@ -386,6 +394,14 @@ def ezville_loop(config):
                         ACK_PACKET = True
                     
                     if STATE_PACKET or ACK_PACKET:
+                        # 엘리베이터 도착 패킷 감지 (예: F7 33 01 43 ...)
+                        try:
+                            if packet[2:8] == '330143':
+                                payload = {'event': 'elevator_arrival', 'packet': packet, 'timestamp': int(time.time())}
+                                mqtt_client.publish(HA_TOPIC + '/elevator/arrival', json.dumps(payload))
+                                log('[ALERT] Elevator arrival detected: {}'.format(packet))
+                        except Exception as _e:
+                            log('[ERROR] Elevator arrival publish failed: {}'.format(_e))
                         # MSG_CACHE에 없는 새로운 패킷이거나 FORCE_UPDATE 실행된 경우만 실행
                         if MSG_CACHE.get(packet[0:10]) != packet[10:] or FORCE_UPDATE:
                             name = STATE_HEADER[packet[2:4]][0]                            
@@ -624,9 +640,11 @@ def ezville_loop(config):
     # HA에서 전달된 메시지 처리        
     async def HA_process(topics, value):
         nonlocal CMD_QUEUE
+        nonlocal last_command_time
 
         device_info = topics[1].split('_')
         device = device_info[0]
+        last_command_time = time.time()
         
         if mqtt_log:
             log('[LOG] HA ->> : {} -> {}'.format('/'.join(topics), value))
@@ -853,6 +871,32 @@ def ezville_loop(config):
         # 리셋 후 60초간 Delay
         await asyncio.sleep(60)
         
+    # Addon 먹통 상태 감지 및 자동 리셋
+    async def addon_health_loop():
+        nonlocal restart_flag
+        
+        while True:
+            timestamp = time.time()
+            
+            # 마지막 명령 또는 상태 업데이트 시간 확인
+            time_since_command = timestamp - last_command_time
+            time_since_state = timestamp - last_state_update_time
+            
+            # 명령과 상태 업데이트 중 더 최근의 시간 기준으로 판단
+            last_activity_time = max(last_command_time, last_state_update_time)
+            time_since_activity = timestamp - last_activity_time
+            
+            if time_since_activity > HEALTH_CHECK_TIMEOUT:
+                log('[WARNING] Addon 먹통 감지: {}초 동안 활동 없음. 자동 리셋 트리거'.format(int(time_since_activity)))
+                log('[DEBUG] Last command time: {}, Last state update time: {}'.format(last_command_time, last_state_update_time))
+                restart_flag = True
+                await asyncio.sleep(0)
+            else:
+                if debug:
+                    log('[DEBUG] Addon 상태 정상: 마지막 활동 이후 {:.1f}초 경과 (타임아웃: {}초)'.format(time_since_activity, HEALTH_CHECK_TIMEOUT))
+            
+            # HEALTH_CHECK_INTERVAL 초마다 체크
+            await asyncio.sleep(HEALTH_CHECK_INTERVAL)
     
     def initiate_socket():
         # SOCKET 통신 시작
@@ -1021,6 +1065,8 @@ def ezville_loop(config):
         tasklist.append(loop.create_task(command_loop()))
         # EW11 상태 체크 loop 실행
         tasklist.append(loop.create_task(ew11_health_loop()))
+        # Addon 먹통 상태 감지 및 자동 리셋 loop 실행
+        tasklist.append(loop.create_task(addon_health_loop()))
         
         # ADDON 정상 시작 Flag 설정
         ADDON_STARTED = True
@@ -1040,6 +1086,8 @@ def ezville_loop(config):
         MSG_CACHE = {}
         DISCOVERY_LIST = []
         RESIDUE = ''
+        last_command_time = time.time()
+        last_state_update_time = time.time()
 
 
 if __name__ == '__main__':
