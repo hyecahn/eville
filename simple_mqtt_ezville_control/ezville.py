@@ -394,9 +394,10 @@ def ezville_loop(config):
                         ACK_PACKET = True
                     
                     if STATE_PACKET or ACK_PACKET:
-                        # 엘리베이터 도착 패킷 감지 (예: F7 33 01 43 ...)
+                        # 엘리베이터 도착 패킷 감지 (F7 33 01 43 01 80 07 ...)
+                        # 패킷 분석: F7=시작, 33=엘리베이터, 0143=도착명령, 018007=도착상태
                         try:
-                            if packet[2:8] == '330143':
+                            if packet[2:14] == '33014301800716' or packet[2:14] == '33014301800706' or packet[2:12] == '330143018007':
                                 payload = {'event': 'elevator_arrival', 'packet': packet, 'timestamp': int(time.time())}
                                 mqtt_client.publish(HA_TOPIC + '/elevator/arrival', json.dumps(payload))
                                 log('[ALERT] Elevator arrival detected: {}'.format(packet))
