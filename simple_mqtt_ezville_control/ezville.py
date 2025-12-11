@@ -396,7 +396,23 @@ def ezville_loop(config):
                     # 엘리베이터 도착 패킷 감지 (F7 33 01 43 01 80 07 ...)
                         # 패킷 분석: F7=시작, 33=엘리베이터, 0143=도착명령, 018007=도착상태
                     try:
-                        if packet[2:12] == '330143018007':
+                        # 디버그 출력: 도착 패킷 분기 전에 상태를 기록합니다.
+                        # 문제 재현 시 이 로그를 확인하면 슬라이스/플래그/토글 값이 무엇인지 알 수 있습니다.
+                        try:
+                            s2_14 = packet[2:14]
+                        except Exception:
+                            s2_14 = '<slice-error>'
+                        try:
+                            s2_12 = packet[2:12]
+                        except Exception:
+                            s2_12 = '<slice-error>'
+
+                        log('[DEBUG] Arrival check -> packet: {} | packet[2:14]: {} | packet[2:12]: {} | STATE_PACKET: {} | ACK_PACKET: {} | ew11_log: {} | mqtt_log: {}'.format(
+                            packet, s2_14, s2_12, STATE_PACKET, ACK_PACKET, ew11_log, mqtt_log))
+
+                        # 패킷 슬라이스 길이 오류 수정: '330143018007'은 12문자이므로
+                        # 시작 인덱스 2부터 끝 인덱스 14까지 잘라야 정확히 비교됩니다.
+                        if s2_14 == '330143018007':
                             payload = {'event': 'elevator_arrival', 'packet': packet, 'timestamp': int(time.time())}
                             mqtt_client.publish(HA_TOPIC + '/elevator/arrival', json.dumps(payload))
                             log('[ALERT] Elevator arrival detected: {}'.format(packet))
