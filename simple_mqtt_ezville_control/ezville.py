@@ -407,9 +407,10 @@ def ezville_loop(config):
                         except Exception:
                             s2_12 = '<slice-error>'
 
-                        log('[DEBUG] Arrival check -> packet: {} | packet[2:14]: {} | packet[2:12]: {} | STATE_PACKET: {} | ACK_PACKET: {} | ew11_log: {} | mqtt_log: {}'.format(
-                            packet, s2_14, s2_12, STATE_PACKET, ACK_PACKET, ew11_log, mqtt_log))
-
+                        if debug:
+                            log('[DEBUG] Arrival check -> packet: {} | packet[2:14]: {} | packet[2:12]: {} | STATE_PACKET: {} | ACK_PACKET: {} | ew11_log: {} | mqtt_log: {}'.format(
+                                packet, s2_14, s2_12, STATE_PACKET, ACK_PACKET, ew11_log, mqtt_log))
+                        #F7330143018007F6
                         # 패킷 슬라이스 길이 오류 수정: '330143018007'은 12문자이므로
                         # 시작 인덱스 2부터 끝 인덱스 14까지 잘라야 정확히 비교됩니다.
                         if s2_14 == '330143018007':
