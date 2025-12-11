@@ -393,34 +393,17 @@ def ezville_loop(config):
                     elif packet[2:4] in ACK_HEADER and packet[6:8] in ACK_HEADER[packet[2:4]][1]:
                         ACK_PACKET = True
                     
-                    # 엘리베이터 도착 패킷 감지 (F7 33 01 43 01 80 07 ...)
-                        # 패킷 분석: F7=시작, 33=엘리베이터, 0143=도착명령, 018007=도착상태
-                    try:
-                        # 디버그 출력: 도착 패킷 분기 전에 상태를 기록합니다.
-                        # 문제 재현 시 이 로그를 확인하면 슬라이스/플래그/토글 값이 무엇인지 알 수 있습니다.
+                    # 엘리베이터 도착 패킷 감지: F7330143018007F6 (고정 14문자)
+                    # 패킷 분석: F7=시작, 33=엘리베이터, 0143=도착명령, 018007=도착상태, F6=체크섬/add
+                    if packet == 'F7330143018007F6':
                         try:
-                            s2_14 = packet[2:14]
-                        except Exception:
-                            s2_14 = '<slice-error>'
-                        try:
-                            s2_12 = packet[2:12]
-                        except Exception:
-                            s2_12 = '<slice-error>'
-
-                        if debug:
-                            log('[DEBUG] Arrival check -> packet: {} | packet[2:14]: {} | packet[2:12]: {} | STATE_PACKET: {} | ACK_PACKET: {} | ew11_log: {} | mqtt_log: {}'.format(
-                                packet, s2_14, s2_12, STATE_PACKET, ACK_PACKET, ew11_log, mqtt_log))
-                        #F7330143018007F6
-                        # 패킷 슬라이스 길이 오류 수정: '330143018007'은 12문자이므로
-                        # 시작 인덱스 2부터 끝 인덱스 14까지 잘라야 정확히 비교됩니다.
-                        if s2_14 == '330143018007':
                             payload = {'event': 'elevator_arrival', 'packet': packet, 'timestamp': int(time.time())}
                             mqtt_client.publish(HA_TOPIC + '/elevator/arrival', json.dumps(payload))
                             log('[ALERT] Elevator arrival detected: {}'.format(packet))
                             if mqtt_log:
                                 log('[LOG] ->> HA : {} >> {}'.format(HA_TOPIC + '/elevator/arrival', json.dumps(payload)))
-                    except Exception as _e:
-                        log('[ERROR] Elevator arrival publish failed: {}'.format(_e))
+                        except Exception as _e:
+                            log('[ERROR] Elevator arrival publish failed: {}'.format(_e))
 
                     if STATE_PACKET or ACK_PACKET:
                         # MSG_CACHE에 없는 새로운 패킷이거나 FORCE_UPDATE 실행된 경우만 실행
@@ -852,23 +835,59 @@ def ezville_loop(config):
             return
         
                                                 
-    # EW11 동작 상태를 체크해서 필요시 리셋 실시
-    async def ew11_health_loop():        
+    # EW11 동작 상태를 체크해서 필요시 리셋 실시 및 HA에 상태 알림
+    async def ew11_health_loop():
+        nonlocal restart_flag
+        
+        ew11_status = 'online'  # EW11 상태 추적: 'online' 또는 'offline'
+        
         while True:
             timestamp = time.time()
+            time_since_last_packet = timestamp - last_received_time
         
-            # TIMEOUT 시간 동안 새로 받은 EW11 패킷이 없으면 재시작
-            if timestamp - last_received_time > EW11_TIMEOUT:
-                log('[WARNING] {} {} {}초간 신호를 받지 못했습니다. ew11 기기를 재시작합니다.'.format(timestamp, last_received_time, EW11_TIMEOUT))
-                try:
-                    await reset_EW11()
+            # TIMEOUT 시간 동안 새로 받은 EW11 패킷이 없으면 상태를 'offline'으로 변경 및 HA에 알림
+            if time_since_last_packet > EW11_TIMEOUT:
+                if ew11_status == 'online':
+                    # 처음 타임아웃 감지 시 HA에 알림
+                    ew11_status = 'offline'
+                    log('[WARNING] EW11 패킷 수신 타임아웃: {:.1f}초 동안 신호 없음'.format(time_since_last_packet))
                     
-                    restart_flag = True
-
-                except:
-                    log('[ERROR] 기기 재시작 오류! 기기 상태를 확인하세요.')
+                    # HA에 EW11 상태 알림 (MQTT publish)
+                    try:
+                        payload = {'status': 'offline', 'timestamp': int(time.time()), 'last_packet_time': int(last_received_time)}
+                        mqtt_client.publish(HA_TOPIC + '/ew11/status', json.dumps(payload))
+                        log('[ALERT] EW11 offline 상태를 HA에 전송')
+                        if mqtt_log:
+                            log('[LOG] ->> HA : {} >> {}'.format(HA_TOPIC + '/ew11/status', json.dumps(payload)))
+                    except Exception as _e:
+                        log('[ERROR] EW11 상태 publish 실패: {}'.format(_e))
+                    
+                    # EW11 재시작 시도
+                    try:
+                        log('[INFO] EW11 기기 재시작 시도')
+                        await reset_EW11()
+                        restart_flag = True
+                    except Exception as _e:
+                        log('[ERROR] EW11 기기 재시작 오류: {}'.format(_e))
             else:
-                log('[INFO] EW11 연결 상태 문제 없음')
+                if ew11_status == 'offline':
+                    # 타임아웃 해제되어 다시 online 상태로 변경 시 HA에 알림
+                    ew11_status = 'online'
+                    log('[INFO] EW11 패킷 수신 복구됨')
+                    
+                    # HA에 EW11 복구 상태 알림
+                    try:
+                        payload = {'status': 'online', 'timestamp': int(time.time())}
+                        mqtt_client.publish(HA_TOPIC + '/ew11/status', json.dumps(payload))
+                        log('[INFO] EW11 online 상태를 HA에 전송')
+                        if mqtt_log:
+                            log('[LOG] ->> HA : {} >> {}'.format(HA_TOPIC + '/ew11/status', json.dumps(payload)))
+                    except Exception as _e:
+                        log('[ERROR] EW11 상태 publish 실패: {}'.format(_e))
+                else:
+                    if debug:
+                        log('[DEBUG] EW11 연결 상태 정상: {:.1f}초 전 패킷 수신'.format(time_since_last_packet))
+            
             await asyncio.sleep(EW11_TIMEOUT)        
 
                                                 
